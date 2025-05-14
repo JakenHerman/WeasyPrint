@@ -37,7 +37,8 @@ jobs:
             --add-binary "$PANGO_PREFIX/lib/libpango-1.0.0.dylib:./lib" \
             --add-binary "$FONTCONFIG_PREFIX/lib/libfontconfig.1.dylib:./lib" \
             --runtime-hook weasyprint/set_dyld_path.py
-
+          
+          mkdir -p dist/lib
           ln -s libgobject-2.0.0.dylib dist/lib/libgobject-2.0-0
       - name: Test executable
         run: dist/weasyprint --info
