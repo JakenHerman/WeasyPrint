@@ -42,8 +42,8 @@ jobs:
           ln -s libgobject-2.0.0.dylib dist/lib/libgobject-2.0-0
       - name: Test executable
         run: |
-          export DYLD_LIBRARY_PATH=$PWD/dist/lib
-          dist/weasyprint --info
+          export DYLD_LIBRARY_PATH=$PWD/dist:$PWD/dist/lib
+          ./dist/weasyprint --info
       - name: Store executable
         uses: actions/upload-artifact@v4
         with:
