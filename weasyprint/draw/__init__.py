@@ -74,11 +74,11 @@ def draw_stacking_context(stream, stacking_context):
         # Point 1 is done in draw_page.
 
         # Point 2.
-        if isinstance(box, (boxes.BlockBox, boxes.MarginBox,
-                            boxes.InlineBlockBox, boxes.TableCellBox,
-                            boxes.FlexContainerBox, boxes.ReplacedBox)):
+        if isinstance(box, (boxes.BlockBox, boxes.MarginBox, boxes.InlineBlockBox,
+                            boxes.TableCellBox, boxes.FlexContainerBox,
+                            boxes.GridContainerBox, boxes.ReplacedBox)):
             set_mask_border(stream, box)
-            # The canvas background was removed by layout_backgrounds
+            # The canvas background was removed by layout_backgrounds.
             draw_background(stream, box.background)
             draw_border(stream, box)
 
@@ -152,7 +152,7 @@ def draw_stacking_context(stream, stacking_context):
 
 
 def draw_background(stream, bg, clip_box=True, bleed=None, marks=()):
-    """Draw the background color and image to a ``document.Stream``.
+    """Draw the background color and image to a ``pdf.stream.Stream``.
 
     If ``clip_box`` is set to ``False``, the background is not clipped to the
     border box of the background, but only to the painting area.
@@ -171,8 +171,7 @@ def draw_background(stream, bg, clip_box=True, bleed=None, marks=()):
         # Draw background color.
         if bg.color.alpha > 0:
             with stacked(stream):
-                stream.set_color_rgb(*bg.color[:3])
-                stream.set_alpha(bg.color.alpha)
+                stream.set_color(bg.color)
                 painting_area = bg.layers[-1].painting_area
                 stream.rectangle(*painting_area)
                 stream.clip()
@@ -484,7 +483,7 @@ def draw_collapsed_borders(stream, table):
 
 
 def draw_replacedbox(stream, box):
-    """Draw the given :class:`boxes.ReplacedBox` to a ``document.Stream``."""
+    """Draw the given :class:`boxes.ReplacedBox` to a ``pdf.stream.Stream``."""
     if box.style['visibility'] != 'visible' or not box.width or not box.height:
         return
 

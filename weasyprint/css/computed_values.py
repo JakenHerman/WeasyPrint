@@ -3,10 +3,10 @@
 from math import pi
 from urllib.parse import unquote
 
-from tinycss2.color3 import parse_color
+from tinycss2.color4 import parse_color
 
 from ..logger import LOGGER
-from ..text.ffi import ffi, pango, units_to_double
+from ..text.ffi import FROM_UNITS, ffi, pango
 from ..text.line_break import Layout, first_line_metrics
 from ..urls import get_link_attribute
 from .properties import INITIAL_VALUES, ZERO_PIXELS, Dimension
@@ -267,9 +267,11 @@ def break_before_after(style, name, value):
 @register_computer('text-indent')
 @register_computer('hyphenate-limit-zone')
 @register_computer('flex-basis')
+@register_computer('text-underline-offset')
+@register_computer('text-decoration-thickness')
 def length(style, name, value, font_size=None, pixels_only=False):
     """Compute a length ``value``."""
-    if value in ('auto', 'content'):
+    if value in ('auto', 'content', 'from-font'):
         return value
     if value.value == 0:
         return 0 if pixels_only else ZERO_PIXELS
@@ -335,7 +337,7 @@ def image_orientation(style, name, values):
     if values in ('none', 'from-image'):
         return values
     angle, flip = values
-    return (int(round(angle / pi * 2)) % 4 * 90, flip)
+    return (round(angle / pi * 2) % 4 * 90, flip)
 
 
 @register_computer('border-top-width')
@@ -429,8 +431,9 @@ def border_image_repeat(style, name, values):
 
 
 @register_computer('column-width')
-def column_width(style, name, value):
-    """Compute the ``column-width`` property."""
+@register_computer('outline-offset')
+def length_pixels_only(style, name, value):
+    """Compute a pixel length property."""
     return length(style, name, value, pixels_only=True)
 
 
@@ -815,9 +818,9 @@ def character_ratio(style, character):
     logical_extents = ffi.new('PangoRectangle *')
     pango.pango_layout_line_get_extents(line, ink_extents, logical_extents)
     if character == 'x':
-        measure = -units_to_double(ink_extents.y)
+        measure = -ink_extents.y * FROM_UNITS
     else:
-        measure = units_to_double(logical_extents.width)
+        measure = logical_extents.width * FROM_UNITS
     ffi.release(ink_extents)
     ffi.release(logical_extents)
 

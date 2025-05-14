@@ -82,10 +82,8 @@ def test_stroke_fill_opacity(assert_same_renderings):
     )
 
 
-@pytest.mark.xfail
 @assert_no_logs
 def test_pattern_gradient_stroke_fill_opacity(assert_same_renderings):
-    # TODO: broken with old versons of Ghostscript
     assert_same_renderings(
         opacity_source % '''
             <defs>
@@ -134,7 +132,7 @@ def test_pattern_gradient_stroke_fill_opacity(assert_same_renderings):
 
 @assert_no_logs
 def test_translate_opacity(assert_same_renderings):
-    # Regression test for https://github.com/Kozea/WeasyPrint/issues/1976
+    # Regression test for #1976.
     assert_same_renderings(
         opacity_source % '''
             <rect transform="translate(2, 2)" width="5" height="5"
@@ -143,5 +141,21 @@ def test_translate_opacity(assert_same_renderings):
         opacity_source % '''
             <rect x="2" y="2" width="5" height="5"
                   fill="blue" opacity="50%" />
+        ''',
+    )
+
+
+@assert_no_logs
+def test_translate_use_opacity(assert_same_renderings):
+    # Regression test for #1976.
+    assert_same_renderings(
+        opacity_source % '''
+            <defs>
+              <rect id="rect" x="-10" y="-10" width="5" height="5" fill="blue" />
+            </defs>
+            <use href="#rect" transform="translate(12, 12)" opacity="0.5" />
+        ''',
+        opacity_source % '''
+            <rect x="2" y="2" width="5" height="5" fill="blue" opacity="50%" />
         ''',
     )

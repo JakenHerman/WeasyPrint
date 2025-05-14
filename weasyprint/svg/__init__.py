@@ -92,6 +92,7 @@ class Node:
         self._wrapper = wrapper
         self._etree_node = wrapper.etree_element
         self._style = style
+        self._children = None
 
         self.attrib = wrapper.etree_element.attrib.copy()
 
@@ -178,10 +179,14 @@ class Node:
 
     def __iter__(self):
         """Yield node children, handling cascade."""
-        for wrapper in self._wrapper:
-            child = Node(wrapper, self._style)
-            self.cascade(child)
-            yield child
+        if self._children is None:
+            children = []
+            for wrapper in self._wrapper:
+                child = Node(wrapper, self._style)
+                self.cascade(child)
+                children.append(child)
+            self._children = children
+        return iter(self._children)
 
     def get_viewbox(self):
         """Get node viewBox as a tuple of floats."""
@@ -336,6 +341,7 @@ class SVG:
         self.masks = {}
         self.patterns = {}
         self.paths = {}
+        self.symbols = {}
 
         self.use_cache = {}
 
@@ -415,10 +421,7 @@ class SVG:
         opacity = alpha_value(node.get('opacity', 1))
         if fill_stroke and 0 <= opacity < 1:
             original_streams.append(self.stream)
-            box = self.calculate_bounding_box(node, font_size)
-            if not is_valid_bounding_box(box):
-                box = (0, 0, self.inner_width, self.inner_height)
-            self.stream = self.stream.add_group(*box)
+            self.stream = self.stream.add_group(0, 0, 0, 0)  # BBox set after drawing
 
         # Clip
         clip_path = parse_url(node.get('clip-path')).fragment
@@ -443,19 +446,14 @@ class SVG:
             if new_ctm.determinant:
                 self.stream.transform(*(old_ctm @ new_ctm.invert).values)
 
-        # Handle text anchor
-        if node.tag == 'text':
-            text_anchor = node.get('text-anchor')
-            children = tuple(node)
-            if children and not node.text:
-                text_anchor = children[0].get('text-anchor')
-        if node.tag == 'text' and text_anchor in ('middle', 'end'):
-            group = self.stream.add_group(0, 0, 0, 0)  # BBox set after drawing
-            original_streams.append(self.stream)
-            self.stream = group
-
-        # Set text bounding box
+        # Handle text anchor and set text bounding box
+        text_anchor_shift = False
         if node.display and TAGS.get(node.tag) == text:
+            if (text_anchor := node.get('text-anchor')) in ('middle', 'end'):
+                text_anchor_shift = True
+                group = self.stream.add_group(0, 0, 0, 0)  # BBox set after drawing
+                original_streams.append(self.stream)
+                self.stream = group
             node.text_bounding_box = EMPTY_BOUNDING_BOX
 
         # Save concrete size of root svg tag
@@ -471,7 +469,14 @@ class SVG:
         # Draw node children
         if node.display and node.tag not in DEF_TYPES:
             for child in node:
+                new_chunk = text_anchor_shift and (
+                    child.tag == 'text' or 'x' in child.attrib or 'y' in child.attrib)
+                if new_chunk:
+                    new_stream = self.stream
+                    self.stream = original_streams[-1]
                 self.draw_node(child, font_size, fill_stroke)
+                if new_chunk:
+                    self.stream = new_stream
                 visible_text_child = (
                     TAGS.get(node.tag) == text and
                     TAGS.get(child.tag) == text and
@@ -490,7 +495,7 @@ class SVG:
             self.tree.set_svg_size(svg, concrete_width, concrete_height)
 
         # Handle text anchor
-        if node.tag == 'text' and text_anchor in ('middle', 'end'):
+        if text_anchor_shift:
             group_id = self.stream.id
             self.stream = original_streams.pop()
             self.stream.push_state()
@@ -501,7 +506,8 @@ class SVG:
                     x - font_size, y - font_size,
                     x + width + font_size, y + height + font_size)
                 x_align = width / 2 if text_anchor == 'middle' else width
-                self.stream.transform(e=-x_align)
+                if node.tag == 'text' or 'x' in node.attrib or 'y' in node.attrib:
+                    self.stream.transform(e=-x_align)
             self.stream.draw_x_object(group_id)
             self.stream.pop_state()
 
@@ -519,6 +525,12 @@ class SVG:
 
         # Apply opacity stream and restore original stream
         if fill_stroke and 0 <= opacity < 1:
+            box = self.calculate_bounding_box(node, font_size)
+            if not is_valid_bounding_box(box):
+                box = (0, 0, self.inner_width, self.inner_height)
+            x, y, width, height = box
+            self.stream.extra['BBox'][:] = x, y, x + width, y + height
+
             group_id = self.stream.id
             self.stream = original_streams.pop()
             self.stream.set_alpha(opacity, stroke=True, fill=True)
@@ -672,9 +684,9 @@ class SVG:
         fill_drawn = draw_gradient_or_pattern(
             self, node, fill_source, font_size, fill_opacity, stroke=False)
         if fill_color and not fill_drawn:
-            red, green, blue, alpha = color(fill_color)
-            self.stream.set_color_rgb(red, green, blue)
-            self.stream.set_alpha(alpha * fill_opacity)
+            stream_color = color(fill_color)
+            stream_color.alpha *= fill_opacity
+            self.stream.set_color(stream_color)
         fill = fill_color or fill_drawn
 
         # Get stroke data
@@ -683,9 +695,9 @@ class SVG:
         stroke_drawn = draw_gradient_or_pattern(
             self, node, stroke_source, font_size, stroke_opacity, stroke=True)
         if stroke_color and not stroke_drawn:
-            red, green, blue, alpha = color(stroke_color)
-            self.stream.set_color_rgb(red, green, blue, stroke=True)
-            self.stream.set_alpha(alpha * stroke_opacity, stroke=True)
+            stream_color = color(stroke_color)
+            stream_color.alpha *= stroke_opacity
+            self.stream.set_color(stream_color, stroke=True)
         stroke = stroke_color or stroke_drawn
         stroke_width = self.length(node.get('stroke-width', '1px'), font_size)
         if stroke_width:

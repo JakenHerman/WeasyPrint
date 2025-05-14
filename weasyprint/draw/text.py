@@ -7,7 +7,7 @@ from PIL import Image
 
 from ..images import RasterImage, SVGImage
 from ..matrix import Matrix
-from ..text.ffi import ffi, pango, units_from_double, units_to_double
+from ..text.ffi import FROM_UNITS, TO_UNITS, ffi, pango
 from ..text.fonts import get_hb_object_data
 from ..text.line_break import get_last_word_end
 from .border import draw_line
@@ -27,26 +27,36 @@ def draw_text(stream, textbox, offset_x, text_overflow, block_ellipsis):
     # Draw underline and overline.
     text_decoration_values = textbox.style['text_decoration_line']
     text_decoration_color = get_color(textbox.style, 'text_decoration_color')
+    if 'underline' in text_decoration_values or 'overline' in text_decoration_values:
+        if textbox.style['text_decoration_thickness'] in ('auto', 'from-font'):
+            thickness = textbox.pango_layout.underline_thickness
+        elif textbox.style['text_decoration_thickness'].unit == '%':
+            ratio = textbox.style['text_decoration_thickness'].value / 100
+            thickness = textbox.style['font_size'] * ratio
+        else:
+            thickness = textbox.style['text_decoration_thickness'].value
     if 'overline' in text_decoration_values:
-        thickness = textbox.pango_layout.underline_thickness
         offset_y = (
             textbox.baseline - textbox.pango_layout.ascent + thickness / 2)
         draw_text_decoration(
             stream, textbox, offset_x, offset_y, thickness,
             text_decoration_color)
     if 'underline' in text_decoration_values:
-        thickness = textbox.pango_layout.underline_thickness
-        offset_y = (
-            textbox.baseline - textbox.pango_layout.underline_position +
-            thickness / 2)
+        if textbox.style['text_underline_offset'] == 'auto':
+            underline_offset = - textbox.pango_layout.underline_position
+        elif textbox.style['text_underline_offset'].unit == '%':
+            ratio = textbox.style['text_underline_offset'].value / 100
+            underline_offset = textbox.style['font_size'] * ratio
+        else:
+            underline_offset = textbox.style['text_underline_offset'].value
+        offset_y = textbox.baseline + underline_offset + thickness / 2
         draw_text_decoration(
             stream, textbox, offset_x, offset_y, thickness,
             text_decoration_color)
 
     # Draw text.
     x, y = textbox.position_x, textbox.position_y + textbox.baseline
-    stream.set_color_rgb(*textbox.style['color'][:3])
-    stream.set_alpha(textbox.style['color'][3])
+    stream.set_color(textbox.style['color'])
     textbox.pango_layout.reactivate(textbox.style)
     stream.begin_text()
     emojis = draw_first_line(
@@ -79,8 +89,7 @@ def draw_first_line(stream, textbox, text_overflow, block_ellipsis, matrix):
     if not textbox.text.strip():
         return []
 
-    font_size = textbox.style['font_size']
-    if font_size < 1e-6:  # default float precision used by pydyf
+    if textbox.style['font_size'] < 1e-6:  # default float precision used by pydyf
         return []
 
     pango.pango_layout_set_single_paragraph_mode(textbox.pango_layout.layout, True)
@@ -89,7 +98,7 @@ def draw_first_line(stream, textbox, text_overflow, block_ellipsis, matrix):
         assert textbox.pango_layout.max_width is not None
         max_width = textbox.pango_layout.max_width
         pango.pango_layout_set_width(
-            textbox.pango_layout.layout, units_from_double(max_width))
+            textbox.pango_layout.layout, int(max_width * TO_UNITS))
         if text_overflow == 'ellipsis':
             pango.pango_layout_set_ellipsize(
                 textbox.pango_layout.layout, pango.PANGO_ELLIPSIZE_END)
@@ -125,9 +134,8 @@ def draw_first_line(stream, textbox, text_overflow, block_ellipsis, matrix):
             first_line, index = textbox.pango_layout.get_first_line()
 
     utf8_text = textbox.pango_layout.text.encode()
-    previous_utf8_position = 0
     stream.set_text_matrix(*matrix.values)
-    last_font = None
+    previous_pango_font = None
     string = ''
     x_advance = 0
     emojis = []
@@ -142,21 +150,28 @@ def draw_first_line(stream, textbox, text_overflow, block_ellipsis, matrix):
         offset = glyph_item.item.offset
         clusters = glyph_string.log_clusters
 
-        # Add font file content.
-        pango_font = glyph_item.item.analysis.font
-        font = stream.add_font(pango_font)
-
         # Get positions of the glyphs in the UTF-8 string.
-        utf8_positions = [offset + clusters[i] for i in range(1, num_glyphs)]
-        utf8_positions.append(offset + glyph_item.item.length)
+        utf8_positions = [offset + clusters[i] for i in range(num_glyphs)]
+        if glyph_item.item.analysis.level % 2:
+            utf8_positions.insert(0, offset + glyph_item.item.length)  # rtl
+        else:
+            utf8_positions.append(offset + glyph_item.item.length)  # ltr
 
-        # Go through the run glyphs.
-        if font != last_font:
+        pango_font = glyph_item.item.analysis.font
+        if pango_font != previous_pango_font:
+            # Add font file content and get font size.
+            previous_pango_font = pango_font
+            font, font_size = stream.add_font(pango_font)
+
+            # Workaround for https://gitlab.gnome.org/GNOME/pango/-/issues/530.
+            if pango.pango_version() < 14802:
+                font_size = textbox.style['font_size']
+
+            # Go through the run glyphs.
             if string:
                 stream.show_text(string)
             string = ''
             stream.set_font_size(font.hash, 1 if font.bitmap else font_size)
-            last_font = font
         string += '<'
         for i in range(num_glyphs):
             glyph_info = glyphs[i]
@@ -166,7 +181,6 @@ def draw_first_line(stream, textbox, text_overflow, block_ellipsis, matrix):
                     glyph & pango.PANGO_GLYPH_UNKNOWN_FLAG):
                 string += f'>{-width / font_size}<'
                 continue
-            utf8_position = utf8_positions[i]
 
             offset = glyph_info.geometry.x_offset / font_size
             rise = glyph_info.geometry.y_offset / 1000
@@ -193,21 +207,19 @@ def draw_first_line(stream, textbox, text_overflow, block_ellipsis, matrix):
             if glyph not in font.widths:
                 pango.pango_font_get_glyph_extents(
                     pango_font, glyph, stream.ink_rect, stream.logical_rect)
-                font.widths[glyph] = int(round(
-                    units_to_double(stream.logical_rect.width * 1000) /
-                    font_size))
+                font.widths[glyph] = round(
+                    stream.logical_rect.width * 1000 * FROM_UNITS / font_size)
 
             # Set kerning, word spacing, letter spacing.
             kerning = int(
-                font.widths[glyph] - units_to_double(width * 1000) / font_size + offset)
+                font.widths[glyph] + offset - width * 1000 * FROM_UNITS / font_size)
             if kerning:
                 string += f'>{kerning}<'
 
             # Create mapping between glyphs and characters.
             if glyph not in font.cmap:
-                utf8_slice = slice(previous_utf8_position, utf8_position)
+                utf8_slice = slice(*sorted(utf8_positions[i:i+2]))
                 font.cmap[glyph] = utf8_text[utf8_slice].decode()
-            previous_utf8_position = utf8_position
 
             # Create list of emojis.
             if font.svg:
@@ -237,9 +249,8 @@ def draw_first_line(stream, textbox, text_overflow, block_ellipsis, matrix):
                     pango.pango_font_get_glyph_extents(
                         pango_font, glyph, stream.ink_rect,
                         stream.logical_rect)
-                    f = units_to_double(
-                        (-stream.logical_rect.y - stream.logical_rect.height))
-                    f = f / font_size - font_size
+                    f = -stream.logical_rect.y
+                    f = f * FROM_UNITS / font_size - font_size
                     emojis.append([image, font, a, d, x_advance, f])
 
             x_advance += (font.widths[glyph] + offset - kerning) / 1000
@@ -257,7 +268,7 @@ def draw_first_line(stream, textbox, text_overflow, block_ellipsis, matrix):
 
 
 def draw_text_decoration(stream, textbox, offset_x, offset_y, thickness, color):
-    """Draw text-decoration of ``textbox`` to a ``document.Stream``."""
+    """Draw text-decoration of ``textbox`` to a ``pdf.stream.Stream``."""
     draw_line(
         stream, textbox.position_x, textbox.position_y + offset_y,
         textbox.position_x + textbox.width, textbox.position_y + offset_y,

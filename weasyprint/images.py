@@ -8,12 +8,11 @@ from io import BytesIO
 from itertools import cycle
 from math import inf
 from pathlib import Path
-from urllib.parse import urlparse
-from urllib.request import url2pathname
 from xml.etree import ElementTree
 
 import pydyf
 from PIL import Image, ImageFile, ImageOps
+from tinycss2.color4 import parse_color
 
 from . import DEFAULT_OPTIONS
 from .layout.percent import percentage
@@ -69,7 +68,7 @@ class RasterImage:
 
         # The presence of the APP14 segment indicates an Adobe image with
         # inverted CMYK data. Specify a Decode Array to invert it again back to
-        # normal. See https://github.com/Kozea/WeasyPrint/pull/2179.
+        # normal. See PR #2179.
         app14 = getattr(original_pillow_image, 'app', {}).get('APP14')
         self.invert_colors = self.mode == 'CMYK' and app14 is not None
 
@@ -126,8 +125,8 @@ class RasterImage:
             width, height = self.width, self.height
         else:
             thumbnail = Image.open(io.BytesIO(self.image_data.data))
-            width = max(1, int(round(self.width * dpi_ratio)))
-            height = max(1, int(round(self.height * dpi_ratio)))
+            width = max(1, round(self.width * dpi_ratio))
+            height = max(1, round(self.height * dpi_ratio))
             thumbnail.thumbnail((width, height))
             image_file = io.BytesIO()
             thumbnail.save(
@@ -298,11 +297,6 @@ def get_image_from_uri(cache, url_fetcher, options, url, forced_mime_type=None,
 
     try:
         with fetch(url_fetcher, url) as result:
-            parsed_url = urlparse(result.get('redirected_url'))
-            if parsed_url.scheme == 'file':
-                filename = url2pathname(parsed_url.path)
-            else:
-                filename = None
             if 'string' in result:
                 string = result['string']
             else:
@@ -336,9 +330,9 @@ def get_image_from_uri(cache, url_fetcher, options, url, forced_mime_type=None,
             else:
                 # Store image id to enable cache in Stream.add_image
                 image_id = md5(url.encode(), usedforsecurity=False).hexdigest()
+                path = result.get('path')
                 image = RasterImage(
-                    pillow_image, image_id, string, filename, cache,
-                    orientation, options)
+                    pillow_image, image_id, string, path, cache, orientation, options)
 
     except (URLFetchingError, ImageLoadingError) as exception:
         LOGGER.error('Failed to load image at %r: %s', url, exception)
@@ -441,6 +435,7 @@ def gradient_average_color(colors, positions):
     """
     https://drafts.csswg.org/css-images-3/#gradient-average-color
     """
+    # TODO: handle color spaces.
     nb_stops = len(positions)
     assert nb_stops > 1
     assert nb_stops == len(colors)
@@ -461,9 +456,13 @@ def gradient_average_color(colors, positions):
             result_g += premul_g[j] * weight
             result_b += premul_b[j] * weight
             result_a += alpha[j] * weight
-    # Un-premultiply:
-    return (result_r / result_a, result_g / result_a,
-            result_b / result_a, result_a) if result_a != 0 else (0, 0, 0, 0)
+    # Un-premultiply.
+    if result_a == 0:
+        return parse_color('transparent')
+    else:
+        return parse_color(
+            f'rgb({result_r / result_a * 255} {result_g / result_a * 255} '
+            f'{result_b / result_a * 255}/{ result_a })')
 
 
 class Gradient:
@@ -480,16 +479,12 @@ class Gradient:
         return None, None, None
 
     def draw(self, stream, concrete_width, concrete_height, _image_rendering):
-        # TODO: handle color spaces
         scale_y, type_, points, positions, colors = self.layout(
             concrete_width, concrete_height)
 
         if type_ == 'solid':
             stream.rectangle(0, 0, concrete_width, concrete_height)
-            red, green, blue, alpha = colors[0]
-            stream.set_color_rgb(red, green, blue)
-            if alpha != 1:
-                stream.set_alpha(alpha, stroke=False)
+            stream.set_color(colors[0])
             stream.fill()
             return
 
@@ -497,8 +492,9 @@ class Gradient:
         alpha_couples = [
             (alphas[i], alphas[i + 1])
             for i in range(len(alphas) - 1)]
+        # TODO: handle other color spaces.
         color_couples = [
-            [colors[i][:3], colors[i + 1][:3], 1]
+            [colors[i].to('srgb')[:3], colors[i + 1].to('srgb')[:3], 1]
             for i in range(len(colors) - 1)]
 
         # Premultiply colors
@@ -522,6 +518,7 @@ class Gradient:
             for c0, c1, n in color_couples)
         function = stream.create_stitching_function(
             domain, encode, bounds, sub_functions)
+        # TODO: handle other color spaces.
         shading = stream.add_shading(
             shading_type, 'RGB', domain, points, extend, function)
         stream.transform(d=scale_y)

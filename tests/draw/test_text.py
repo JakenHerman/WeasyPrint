@@ -84,7 +84,7 @@ def test_text_overflow_ellipsis(assert_pixels):
 
 def test_text_align_rtl_trailing_whitespace(assert_pixels):
     # Test text alignment for rtl text with trailing space.
-    # Test regression: https://github.com/Kozea/WeasyPrint/issues/1111
+    # Regression test for #1111.
     assert_pixels('''
         _________
         _rrrrBBB_
@@ -106,6 +106,62 @@ def test_text_align_rtl_trailing_whitespace(assert_pixels):
       <p style="direction: rtl"> &#8207;abc </p>
       <p style="direction: ltr"> abc </p>
       <p style="direction: ltr"> &#8207;abc </p>
+    ''')
+
+
+def test_rtl_default_direction(assert_pixels):
+    assert_pixels('''
+        _____BBBBB_____
+        _____BBBBB_____
+        _____BBBBB_____
+        _____BBBBB_____
+        BBBBBBBBBB_____
+    ''', '''
+      <style>
+        @page { size: 15px 5px }
+        body { font-family: weasyprint; color: blue; font-size: 5px; line-height: 1 }
+      </style>
+      اب
+    ''')
+
+
+def test_rtl_forced_direction(assert_pixels):
+    assert_pixels('''
+        __________BBBBB
+        __________BBBBB
+        __________BBBBB
+        __________BBBBB
+        _____BBBBBBBBBB
+    ''', '''
+      <style>
+        @page { size: 15px 5px }
+        body { font-family: weasyprint; color: blue; font-size: 5px; line-height: 1 }
+      </style>
+      <div style="direction: rtl">اب</div>
+    ''')
+
+
+def test_rtl_nested_inline(assert_pixels):
+    assert_pixels('''
+        RRRRR________________BBBBB___________RRRRR___________BBBBB
+        RRRRR________________BBBBB___________RRRRR___________BBBBB
+        RRRRR________________BBBBB___________RRRRR___________BBBBB
+        RRRRR________________BBBBB___________RRRRR___________BBBBB
+        RRRRRRRRRR______BBBBBBBBBB______RRRRRRRRRR______BBBBBBBBBB
+        ______________________________________BBBBB__________RRRRR
+        ______________________________________BBBBB__________RRRRR
+        ______________________________________BBBBB__________RRRRR
+        ______________________________________BBBBB__________RRRRR
+        _________________________________BBBBBBBBBB_____RRRRRRRRRR
+    ''', '''
+      <style>
+        @page { size: 58px 10px }
+        body { font-family: weasyprint; color: blue; font-size: 5px; line-height: 1 }
+        span { color: red }
+      </style>
+      <div style="direction: rtl; text-align: justify">
+        اب <span>اب</span> اب <span>با اب</span> اب
+      </div>
     ''')
 
 
@@ -453,6 +509,31 @@ def test_text_align_justify(assert_pixels):
       <div>a c e</div>''')
 
 
+def test_text_align_justify_nbsp(assert_pixels):
+    assert_pixels('''
+        ___________________
+        _RR___RR___RR___RR_
+        _RR___RR___RR___RR_
+        ___________________
+    ''', '''
+      <style>
+        @page {
+          size: 19px 4px;
+        }
+        body {
+          color: red;
+          font-family: weasyprint;
+          font-size: 2px;
+        }
+        div {
+          line-height: 1;
+          margin: 1px;
+          text-align: justify-all;
+        }
+      </style>
+      <div>a b&nbsp;c&nbsp;d</div>''')
+
+
 def test_text_word_spacing(assert_pixels):
     assert_pixels('''
         ___________________
@@ -528,6 +609,118 @@ def test_text_underline(assert_pixels):
       <div>abc</div>''')
 
 
+def test_text_underline_offset(assert_pixels):
+    assert_pixels('''
+        _____________
+        _zzzzzzzzzzz_
+        _zRRRRRRRRRz_
+        _zRRRRRRRRRz_
+        _zzzzzzzzzzz_
+        _zzzzzzzzzzz_
+        _zBBBBBBBBBz_
+        _zzzzzzzzzzz_
+        _____________
+    ''', '''
+      <style>
+        @page {
+          size: 13px 9px;
+          margin: 2px;
+        }
+        body {
+          color: red;
+          font-family: weasyprint;
+          font-size: 3px;
+          text-decoration: underline blue;
+          text-underline-offset: 2px;
+        }
+      </style>
+      <div>abc</div>''')
+
+
+def test_text_underline_offset_percentage(assert_pixels):
+    assert_pixels('''
+        _____________
+        _zzzzzzzzzzz_
+        _zRRRRRRRRRz_
+        _zRRRRRRRRRz_
+        _zzzzzzzzzzz_
+        _zzzzzzzzzzz_
+        _zBBBBBBBBBz_
+        _zzzzzzzzzzz_
+        _____________
+    ''', '''
+      <style>
+        @page {
+          size: 13px 9px;
+          margin: 2px;
+        }
+        body {
+          color: red;
+          font-family: weasyprint;
+          font-size: 3px;
+          text-decoration: underline blue;
+          text-underline-offset: 70%;
+        }
+      </style>
+      <div>abc</div>''')
+
+
+def test_text_underline_thickness(assert_pixels):
+    assert_pixels('''
+        _____________
+        _zzzzzzzzzzz_
+        _zRRRRRRRRRz_
+        _zRRRRRRRRRz_
+        _zzzzzzzzzzz_
+        _zzzzzzzzzzz_
+        _zBBBBBBBBBz_
+        _zBBBBBBBBBz_
+        _zzzzzzzzzzz_
+    ''', '''
+      <style>
+        @page {
+          size: 13px 9px;
+          margin: 2px;
+        }
+        body {
+          color: red;
+          font-family: weasyprint;
+          font-size: 3px;
+          text-decoration: underline blue 3px;
+          text-underline-offset: 2px;
+        }
+      </style>
+      <div>abc</div>''')
+
+
+def test_text_underline_thickness_percentage(assert_pixels):
+    assert_pixels('''
+        _____________
+        _zzzzzzzzzzz_
+        _zRRRRRRRRRz_
+        _zRRRRRRRRRz_
+        _zzzzzzzzzzz_
+        _zzzzzzzzzzz_
+        _zBBBBBBBBBz_
+        _zBBBBBBBBBz_
+        _zzzzzzzzzzz_
+    ''', '''
+      <style>
+        @page {
+          size: 13px 9px;
+          margin: 2px;
+        }
+        body {
+          color: red;
+          font-family: weasyprint;
+          font-size: 3px;
+          text-decoration: underline blue 100%;
+          text-underline-offset: 2px;
+        }
+      </style>
+      <div>abc</div>''')
+
+
 def test_text_overline(assert_pixels):
     # Ascent value seems to be a bit random, don’t try to get the exact
     # position of the line
@@ -581,7 +774,7 @@ def test_text_line_through(assert_pixels):
 
 
 def test_text_multiple_text_decoration(assert_pixels):
-    # Test regression: https://github.com/Kozea/WeasyPrint/issues/1621
+    # Regression test for #1621.
     assert_pixels('''
         _____________
         _zzzzzzzzzzz_
@@ -607,7 +800,7 @@ def test_text_multiple_text_decoration(assert_pixels):
 
 
 def test_text_nested_text_decoration(assert_pixels):
-    # Test regression: https://github.com/Kozea/WeasyPrint/issues/1621
+    # Regression test for #1621.
     assert_pixels('''
         _____________
         _zzzzzzzzzzz_
@@ -732,7 +925,7 @@ def test_text_float_text_decoration(assert_pixels):
 
 
 def test_text_decoration_var(assert_pixels):
-    # Test regression: https://github.com/Kozea/WeasyPrint/issues/1697
+    # Regression test for #1697.
     assert_pixels('''
         _____________
         _zzzzzzzzzzz_
@@ -760,7 +953,7 @@ def test_text_decoration_var(assert_pixels):
 
 
 def test_zero_width_character(assert_pixels):
-    # Test regression: https://github.com/Kozea/WeasyPrint/issues/1508
+    # Regression test for #1508.
     assert_pixels('''
         ______
         _RRRR_
@@ -826,7 +1019,7 @@ def test_missing_glyph_fallback(assert_pixels):
 
 
 def test_tabulation_character(assert_pixels):
-    # Test regression: https://github.com/Kozea/WeasyPrint/issues/1515
+    # Regression test for #1515.
     assert_pixels('''
         __________
         _RR____RR_
@@ -875,3 +1068,191 @@ def test_otb_font(assert_pixels):
         }
       </style>
       AaA''')
+
+
+def test_huge_justification(assert_pixels):
+    # Regression test for #2262.
+    assert_pixels('''
+        ____
+        _RR_
+        _RR_
+        ____
+    ''', '''
+      <style>
+        @page {
+          size: 4px 4px;
+          margin: 1px;
+        }
+        body {
+          color: red;
+          font-family: weasyprint;
+          font-size: 2px;
+          line-height: 1;
+          text-align: justify-all;
+          width: 100000px;
+        }
+      </style>
+      A B''')
+
+
+def test_font_variant_caps_small(assert_pixels):
+    assert_pixels('''
+        ________
+        _BB_BB__
+        _BB_B_B_
+        _B__BB__
+        _B__B___
+        ________
+    ''', '''
+      <style>
+        @page {size: 8px 6px}
+        p {
+          color: blue;
+          font-variant-caps: small-caps;
+          font-family: %s;
+          font-size: 6px;
+          line-height: 1;
+        }
+      </style>
+      <p>Pp</p>
+    ''' % SANS_FONTS)
+
+
+def test_font_variant_caps_all_small(assert_pixels):
+    assert_pixels('''
+        ________
+        BB_BB___
+        B_BB_B__
+        BB_BB___
+        B__B____
+        ________
+    ''', '''
+      <style>
+        @page {size: 8px 6px}
+        p {
+          color: blue;
+          font-variant-caps: all-small-caps;
+          font-family: %s;
+          font-size: 6px;
+          line-height: 1;
+        }
+      </style>
+      <p>Pp</p>
+    ''' % SANS_FONTS)
+
+
+def test_font_variant_caps_petite(assert_pixels):
+    assert_pixels('''
+        ________
+        _BB_BB__
+        _BB_B_B_
+        _B__BB__
+        _B__B___
+        ________
+    ''', '''
+      <style>
+        @page {size: 8px 6px}
+        p {
+          color: blue;
+          font-variant-caps: petite-caps;
+          font-family: %s;
+          font-size: 6px;
+          line-height: 1;
+        }
+      </style>
+      <p>Pp</p>
+    ''' % SANS_FONTS)
+
+
+def test_font_variant_caps_all_petite(assert_pixels):
+    assert_pixels('''
+        ________
+        BB_BB___
+        B_BB_B__
+        BB_BB___
+        B__B____
+        ________
+    ''', '''
+      <style>
+        @page {size: 8px 6px}
+        p {
+          color: blue;
+          font-variant-caps: all-petite-caps;
+          font-family: %s;
+          font-size: 6px;
+          line-height: 1;
+        }
+      </style>
+      <p>Pp</p>
+    ''' % SANS_FONTS)
+
+
+def test_font_variant_caps_unicase(assert_pixels):
+    assert_pixels('''
+        ________
+        BB______
+        B_B_BB__
+        BB__B_B_
+        B___BB__
+        ____B___
+    ''', '''
+      <style>
+        @page {size: 8px 6px}
+        p {
+          color: blue;
+          font-variant-caps: unicase;
+          font-family: %s;
+          font-size: 6px;
+          line-height: 1;
+        }
+      </style>
+      <p>Pp</p>
+    ''' % SANS_FONTS)
+
+
+def test_font_variant_caps_titling(assert_pixels):
+    assert_pixels('''
+        _BB_____
+        _BB_____
+        _BB__BB_
+        _B___B_B
+        _____BB_
+        _____B__
+    ''', '''
+      <style>
+        @page {size: 8px 6px}
+        p {
+          color: blue;
+          font-family: %s;
+          font-size: 6px;
+          line-height: 1;
+        }
+      </style>
+      <p>Pp</p>
+    ''' % SANS_FONTS)
+
+
+def test_unicode_range(assert_pixels):
+    assert_pixels('''
+        __________
+        _RRRRRR___
+        _RRRRRRzz_
+        __________
+    ''', '''
+      <style>
+        @font-face {
+          font-family: uni;
+          src: url(weasyprint.otf);
+          unicode-range: u+41, u+043-045, u+005?;
+        }
+        @page {
+          size: 10px 4px;
+        }
+        body {
+          color: red;
+          font-family: uni;
+          font-size: 2px;
+          line-height: 0;
+          margin: 2px 1px;
+        }
+      </style>ADZB''')

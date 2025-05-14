@@ -10,7 +10,7 @@ from .float import avoid_collisions, float_layout, get_clearance
 from .grid import grid_layout
 from .inline import iter_line_boxes
 from .min_max import handle_min_max_width
-from .percent import resolve_percentages, resolve_position_percentages
+from .percent import percentage, resolve_percentages, resolve_position_percentages
 from .replaced import block_replaced_box_layout
 from .table import table_layout, table_wrapper_width
 
@@ -81,7 +81,7 @@ def block_level_layout_switch(context, box, bottom_space, skip_stack,
     elif isinstance(box, boxes.FlexBox):
         result = flex_layout(
             context, box, bottom_space, skip_stack, containing_block,
-            page_is_empty, absolute_boxes, fixed_boxes)
+            page_is_empty, absolute_boxes, fixed_boxes, discard)
     elif isinstance(box, boxes.GridBox):
         result = grid_layout(
             context, box, bottom_space, skip_stack, containing_block,
@@ -124,9 +124,9 @@ def block_box_layout(context, box, bottom_space, skip_stack,
     result = block_container_layout(
         context, box, bottom_space, skip_stack, page_is_empty,
         absolute_boxes, fixed_boxes, adjoining_margins, discard, max_lines)
-    # TODO: columns shouldn't be block boxes, this condition would then be
-    # useless when this is fixed.
-    if not (new_box := result[0]) or new_box.is_column:
+    # TODO: columns and flex items shouldn't be block boxes, this condition
+    # would then be useless when this is fixed.
+    if not (new_box := result[0]) or new_box.is_column or new_box.is_flex_item:
         return result
     if new_box.is_table_wrapper or new_box.establishes_formatting_context():
         # Don't collide with floats
@@ -383,7 +383,7 @@ def _linebox_layout(context, box, index, child, new_children, page_is_empty,
         # See https://drafts.csswg.org/css-page-3/#allowed-pg-brk
         # "When an unforced page break occurs here, both the adjoining
         #  ‘margin-top’ and ‘margin-bottom’ are set to zero."
-        # See https://github.com/Kozea/WeasyPrint/issues/115
+        # See issue #115.
         elif page_is_empty and context.overflows_page(
                 bottom_space, new_position_y):
             # Remove the top border when a page is empty and the box is
@@ -496,11 +496,22 @@ def _in_flow_layout(context, box, index, child, new_children, page_is_empty,
                 adjoining_margins = []
                 position_y = box.content_box_y()
 
-    if adjoining_margins and box.is_table_wrapper:
-        collapsed_margin = collapse_margin(adjoining_margins)
-        child.position_y += collapsed_margin
-        position_y += collapsed_margin
-        adjoining_margins = []
+    # TODO: Merge this with block_container_layout, block_level_layout, _in_flow_layout,
+    # and check code above.
+    if adjoining_margins:
+        if box.is_table_wrapper:  # should not be a special case
+            collapsed_margin = collapse_margin(adjoining_margins)
+            child.position_y += collapsed_margin
+            adjoining_margins = []
+        elif not isinstance(child, boxes.BlockBox):  # blocks handle that themselves
+            if child.style['margin_top'] == 'auto':
+                margin_top = 0
+            else:
+                margin_top = percentage(child.style['margin_top'], box.width)
+            adjoining_margins.append(margin_top)
+            offset_y = collapse_margin(adjoining_margins) - margin_top
+            child.position_y += offset_y
+            adjoining_margins = []
 
     page_is_empty_with_no_children = page_is_empty and not any(
         child for child in new_children
@@ -515,15 +526,6 @@ def _in_flow_layout(context, box, index, child, new_children, page_is_empty,
          fixed_boxes, adjoining_margins, discard, max_lines)
 
     if new_child is not None:
-        # We need to do this after the child layout to have the
-        # used value for margin_top (eg. it might be a percentage.)
-        if not isinstance(new_child, (boxes.BlockBox, boxes.TableBox)):
-            adjoining_margins.append(new_child.margin_top)
-            offset_y = (
-                collapse_margin(adjoining_margins) - new_child.margin_top)
-            new_child.translate(0, offset_y)
-        # else: blocks handle that themselves.
-
         if not collapsing_through:
             new_content_position_y = (
                 new_child.content_box_y() + new_child.height)
@@ -629,13 +631,12 @@ def block_container_layout(context, box, bottom_space, skip_stack,
                            page_is_empty, absolute_boxes, fixed_boxes,
                            adjoining_margins, discard, max_lines):
     """Set the ``box`` height."""
-    # TODO: boxes.FlexBox is allowed here because flex_layout calls
-    # block_container_layout, there's probably a better solution.
-    assert isinstance(box, (boxes.BlockContainerBox, boxes.FlexBox))
+    assert isinstance(box, boxes.BlockContainerBox)
 
     if box.establishes_formatting_context():
         context.create_block_formatting_context()
 
+    # TODO: merge this with _in_flow_layout, flex_layout…
     is_start = skip_stack is None
     box.remove_decoration(start=not is_start, end=False)
 
@@ -703,6 +704,10 @@ def block_container_layout(context, box, bottom_space, skip_stack,
             if out_of_flow_resume_at:
                 broken_out_of_flow[new_child] = (
                     child, box, out_of_flow_resume_at)
+            if child.is_outside_marker:
+                new_child.position_x = box.border_box_x()
+                if child.style['direction'] == 'rtl':
+                    new_child.position_x += box.width + box.padding_right
 
         elif isinstance(child, boxes.LineBox):
             (abort, stop, resume_at, position_y,
@@ -753,7 +758,7 @@ def block_container_layout(context, box, bottom_space, skip_stack,
                 max_lines)
         elif stop:
             if box.height != 'auto':
-                if context.overflows(box.position_y + box.height, position_y):
+                if context.overflows(box.position_y + box.border_height(), position_y):
                     # Box heigh is fixed and it doesn’t overflow page, forget
                     # overflowing children.
                     resume_at = None

@@ -1,6 +1,6 @@
 """Draw borders."""
 
-from math import ceil, floor, pi, sqrt, tan
+from math import ceil, cos, floor, pi, sin, sqrt, tan
 
 from ..formatting_structure import boxes
 from ..layout import replaced
@@ -27,7 +27,7 @@ def set_mask_border(stream, box):
 
 
 def draw_border(stream, box):
-    """Draw the box borders and column rules to a ``document.Stream``."""
+    """Draw the box borders and column rules to a ``pdf.stream.Stream``."""
 
     # The box is hidden, easy.
     if box.style['visibility'] != 'visible':
@@ -357,6 +357,19 @@ def clip_border_segment(stream, style, width, side, border_box,
         return pi / 8 * (a + b) * (
             1 + 3 * x ** 2 / (10 + sqrt(4 - 3 * x ** 2)))
 
+    def draw_dash(cx, cy, width=0, height=0, r=0):
+        """Draw a single dash or dot centered on cx, cy."""
+        if style == 'dotted':
+            ratio = r / sqrt(pi)
+            stream.move_to(cx + r, cy)
+            stream.curve_to(cx + r, cy + ratio, cx + ratio, cy + r, cx, cy + r)
+            stream.curve_to(cx - ratio, cy + r, cx - r, cy + ratio, cx - r, cy)
+            stream.curve_to(cx - r, cy - ratio, cx - ratio, cy - r, cx, cy - r)
+            stream.curve_to(cx + ratio, cy - r, cx + r, cy - ratio, cx + r, cy)
+            stream.close()
+        elif style == 'dashed':
+            stream.rectangle(cx - width / 2, cy - height / 2, width, height)
+
     if side == 'top':
         (px1, py1), rounded1 = transition_point(tlh, tlv, bl, bt)
         (px2, py2), rounded2 = transition_point(-trh, trv, -br, bt)
@@ -407,25 +420,48 @@ def clip_border_segment(stream, style, width, side, border_box,
 
     if style in ('dotted', 'dashed'):
         dash = width if style == 'dotted' else 3 * width
+        stream.clip(even_odd=True)
+        stream.end()
         if rounded1 or rounded2:
-            # At least one of the two corners is rounded
+            # At least one of the two corners is rounded.
             chl1 = corner_half_length(a1, b1)
             chl2 = corner_half_length(a2, b2)
             length = line_length + chl1 + chl2
             dash_length = round(length / dash)
             if rounded1 and rounded2:
-                # 2x dashes
+                # 2x dashes.
                 dash = length / (dash_length + dash_length % 2)
             else:
-                # 2x - 1/2 dashes
+                # 2x - 1/2 dashes.
                 dash = length / (dash_length + dash_length % 2 - 0.5)
-            dashes1 = int(ceil((chl1 - dash / 2) / dash))
-            dashes2 = int(ceil((chl2 - dash / 2) / dash))
-            line = int(floor(line_length / dash))
+            dashes1 = ceil((chl1 - dash / 2) / dash)
+            dashes2 = ceil((chl2 - dash / 2) / dash)
+            line = floor(line_length / dash)
 
-            def draw_dots(dashes, line, way, x, y, px, py, chl):
-                if not dashes:
-                    return line + 1, 0
+            def draw_dashes(dashes, line, way, x, y, px, py, chl):
+                if style == 'dotted':
+                    if dashes == 0:
+                        return line + 1, -1
+                    elif dashes == 1:
+                        return line + 1, -0.5
+
+                    for i in range(1, dashes, 2):
+                        a = ((2 * angle - way) + i * way * dash / chl) / 4 * pi
+                        cx = x if side in ('top', 'bottom') else main_offset
+                        cy = y if side in ('left', 'right') else main_offset
+                        draw_dash(
+                            cx + px - (abs(px) - dash / 2) * cos(a),
+                            cy + py - (abs(py) - dash / 2) * sin(a),
+                            r=(dash / 2))
+                    next_a = ((2 * angle - way) + (i + 2) * way * dash / chl) / 4 * pi
+                    offset = next_a / pi * 2 - angle
+                    if dashes % 2:
+                        line += 1
+                    return line, offset
+
+                if dashes == 0:
+                    return line + 1, -1/3
+
                 for i in range(0, dashes, 2):
                     i += 0.5  # half dash
                     angle1 = (
@@ -458,61 +494,69 @@ def clip_border_segment(stream, style, width, side, border_box,
                         (angle * pi / 2 - angle2) / (angle2 - angle1))
                 return line, offset
 
-            line, offset = draw_dots(
-                dashes1, line, way, bbx, bby, px1, py1, chl1)
-            line = draw_dots(
+            line, offset = draw_dashes(dashes1, line, way, bbx, bby, px1, py1, chl1)
+            line = draw_dashes(
                 dashes2, line, -way, bbx + bbw, bby + bbh, px2, py2, chl2)[0]
 
             if line_length > 1e-6:
                 for i in range(0, line, 2):
                     i += offset
                     if side in ('top', 'bottom'):
-                        x1 = max(bbx + px1 + i * dash, bbx + px1)
-                        x2 = min(bbx + px1 + (i + 1) * dash, bbx + bbw + px2)
+                        x1 = bbx + px1 + i * dash
+                        x2 = bbx + px1 + (i + 1) * dash
                         y1 = main_offset - (width if way < 0 else 0)
                         y2 = y1 + width
                     elif side in ('left', 'right'):
-                        y1 = max(bby + py1 + i * dash, bby + py1)
-                        y2 = min(bby + py1 + (i + 1) * dash, bby + bbh + py2)
+                        y1 = bby + py1 + i * dash
+                        y2 = bby + py1 + (i + 1) * dash
                         x1 = main_offset - (width if way > 0 else 0)
                         x2 = x1 + width
-                    stream.rectangle(x1, y1, x2 - x1, y2 - y1)
+                    draw_dash(
+                        x1 + (x2 - x1) / 2, y1 + (y2 - y1) / 2,
+                        x2 - x1, y2 - y1, width / 2)
         else:
-            # 2x + 1 dashes
-            stream.clip(even_odd=True)
-            stream.end()
-            dash = length / (
-                round(length / dash) - (round(length / dash) + 1) % 2) or 1
-            for i in range(0, int(round(length / dash)), 2):
+            # No rounded corner, dashes on corners and evenly spaced between.
+            number_of_spaces = floor(length / dash / 2)
+            number_of_dashes = number_of_spaces + 1
+            if style == 'dotted':
+                dash = width
+                if number_of_spaces:
+                    space = (length - number_of_dashes * dash) / number_of_spaces
+                else:
+                    space = 0  # no space, unused
+            elif style == 'dashed':
+                space = dash = length / (number_of_spaces + number_of_dashes) or 1
+            for i in range(0, number_of_dashes + 1):
+                advance = i * (space + dash)
                 if side == 'top':
-                    stream.rectangle(bbx + i * dash, bby, dash, width)
+                    cx, cy = bbx + advance + dash / 2, bby + width / 2
+                    dash_width, dash_height = dash, width
                 elif side == 'right':
-                    stream.rectangle(
-                        bbx + bbw - width, bby + i * dash, width, dash)
+                    cx, cy = bbx + bbw - width / 2, bby + advance + dash / 2
+                    dash_width, dash_height = width, dash
                 elif side == 'bottom':
-                    stream.rectangle(
-                        bbx + i * dash, bby + bbh - width, dash, width)
+                    cx, cy = bbx + advance + dash / 2, bby + bbh - width / 2
+                    dash_width, dash_height = dash, width
                 elif side == 'left':
-                    stream.rectangle(bbx, bby + i * dash, width, dash)
+                    cx, cy = bbx + width / 2, bby + advance + dash / 2
+                    dash_width, dash_height = width, dash
+                draw_dash(cx, cy, dash_width, dash_height, dash / 2)
     stream.clip(even_odd=True)
     stream.end()
 
 
 def draw_rounded_border(stream, box, style, color):
     if style in ('ridge', 'groove'):
-        stream.set_color_rgb(*color[0][:3])
-        stream.set_alpha(color[0][3])
+        stream.set_color(color[0])
         rounded_box(stream, box.rounded_padding_box())
         rounded_box(stream, box.rounded_box_ratio(1 / 2))
         stream.fill(even_odd=True)
-        stream.set_color_rgb(*color[1][:3])
-        stream.set_alpha(color[1][3])
+        stream.set_color(color[1])
         rounded_box(stream, box.rounded_box_ratio(1 / 2))
         rounded_box(stream, box.rounded_border_box())
         stream.fill(even_odd=True)
         return
-    stream.set_color_rgb(*color[:3])
-    stream.set_alpha(color[3])
+    stream.set_color(color)
     rounded_box(stream, box.rounded_padding_box())
     if style == 'double':
         rounded_box(stream, box.rounded_box_ratio(1 / 3))
@@ -525,8 +569,7 @@ def draw_rect_border(stream, box, widths, style, color):
     bbx, bby, bbw, bbh = box
     bt, br, bb, bl = widths
     if style in ('ridge', 'groove'):
-        stream.set_color_rgb(*color[0][:3])
-        stream.set_alpha(color[0][3])
+        stream.set_color(color[0])
         stream.rectangle(*box)
         stream.rectangle(
             bbx + bl / 2, bby + bt / 2,
@@ -536,12 +579,10 @@ def draw_rect_border(stream, box, widths, style, color):
             bbx + bl / 2, bby + bt / 2,
             bbw - (bl + br) / 2, bbh - (bt + bb) / 2)
         stream.rectangle(bbx + bl, bby + bt, bbw - bl - br, bbh - bt - bb)
-        stream.set_color_rgb(*color[1][:3])
-        stream.set_alpha(color[1][3])
+        stream.set_color(color[1])
         stream.fill(even_odd=True)
         return
-    stream.set_color_rgb(*color[:3])
-    stream.set_alpha(color[3])
+    stream.set_color(color)
     stream.rectangle(*box)
     if style == 'double':
         stream.rectangle(
@@ -559,13 +600,13 @@ def draw_line(stream, x1, y1, x2, y2, thickness, style, color, offset=0):
 
     with stacked(stream):
         if style not in ('ridge', 'groove'):
-            stream.set_color_rgb(*color[:3], stroke=True)
-            stream.set_alpha(color[3], stroke=True)
+            stream.set_color(color, stroke=True)
 
         if style == 'dashed':
             stream.set_dash([5 * thickness], offset)
         elif style == 'dotted':
-            stream.set_dash([thickness], offset)
+            stream.set_line_cap(1)
+            stream.set_dash([0, 2 * thickness], offset)
 
         if style == 'double':
             stream.set_line_width(thickness / 3)
@@ -581,8 +622,7 @@ def draw_line(stream, x1, y1, x2, y2, thickness, style, color, offset=0):
                 stream.line_to(x2, y2 + thickness / 3)
         elif style in ('ridge', 'groove'):
             stream.set_line_width(thickness / 2)
-            stream.set_color_rgb(*color[0][:3], stroke=True)
-            stream.set_alpha(color[0][3], stroke=True)
+            stream.set_color(color[0], stroke=True)
             if x1 == x2:
                 stream.move_to(x1 + thickness / 4, y1)
                 stream.line_to(x2 + thickness / 4, y2)
@@ -590,8 +630,7 @@ def draw_line(stream, x1, y1, x2, y2, thickness, style, color, offset=0):
                 stream.move_to(x1, y1 + thickness / 4)
                 stream.line_to(x2, y2 + thickness / 4)
             stream.stroke()
-            stream.set_color_rgb(*color[1][:3], stroke=True)
-            stream.set_alpha(color[1][3], stroke=True)
+            stream.set_color(color[1], stroke=True)
             if x1 == x2:
                 stream.move_to(x1 - thickness / 4, y1)
                 stream.line_to(x2 - thickness / 4, y2)
@@ -610,6 +649,7 @@ def draw_line(stream, x1, y1, x2, y2, thickness, style, color, offset=0):
             x = x1 - offset
             stream.move_to(x, y1)
             while x < x2:
+                stream.set_line_width(thickness)
                 stream.curve_to(
                     x + radius / 2, y1 + up * radius,
                     x + 3 * radius / 2, y1 + up * radius,
@@ -625,12 +665,15 @@ def draw_line(stream, x1, y1, x2, y2, thickness, style, color, offset=0):
 
 def draw_outline(stream, box):
     width = box.style['outline_width']
+    offset = box.style['outline_offset']
     color = get_color(box.style, 'outline_color')
     style = box.style['outline_style']
     if box.style['visibility'] == 'visible' and width and color.alpha:
         outline_box = (
-            box.border_box_x() - width, box.border_box_y() - width,
-            box.border_width() + 2 * width, box.border_height() + 2 * width)
+            box.border_box_x() - width - offset,
+            box.border_box_y() - width - offset,
+            box.border_width() + 2 * width + 2 * offset,
+            box.border_height() + 2 * width + 2 * offset)
         for side in SIDES:
             with stacked(stream):
                 clip_border_segment(stream, style, width, side, outline_box)

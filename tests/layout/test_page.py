@@ -450,7 +450,7 @@ def test_page_breaks_complex_8():
 
 @assert_no_logs
 def test_page_breaks_complex_9():
-    # Test regression: https://github.com/Kozea/WeasyPrint/issues/1979
+    # Regression test for #1979.
     page_1, page_2, page_3, page_4, page_5 = render_pages('''
       <style>
         @page { size: 75px; margin: 0 }
@@ -877,7 +877,7 @@ def test_page_names_10():
     page1, page2 = pages
 
     assert (page1.width, page1.height) == (100, 100)
-    html, runing = page1.children
+    html, running = page1.children
     body, = html.children
     fixed, section, = body.children
     h1, pagebreak = section.children
@@ -889,6 +889,152 @@ def test_page_names_10():
     section, = body.children
     article, = section.children
     assert article.element_tag == 'article'
+
+
+@assert_no_logs
+def test_page_groups():
+    pages = render_pages('''
+      <style>
+        @page { size: 200px 200px }
+        @page small { size: 100px 100px }
+        @page :nth(1 of small) { size: 50px 50px }
+        section { page: small }
+        div, div section { break-after: page }
+      </style>
+      <div></div>
+      <article></article>
+      <section>
+        <div></div>
+        <div></div>
+      </section>
+      <section>
+      </section>
+      <div></div>
+      <div></div>
+      <section>
+        <div></div>
+      </section>
+      <div>
+        <section></section>
+        <section></section>
+      </div>
+    ''')
+    page1, page2, page3, page4, page5, page6, page7, page8, page9 = pages
+
+    assert (page1.width, page1.height) == (200, 200)
+    div, = page1.children[0].children[0].children
+    assert div.element_tag == 'div'
+
+    assert (page2.width, page2.height) == (200, 200)
+    article, = page2.children[0].children[0].children
+    assert article.element_tag == 'article'
+
+    assert (page3.width, page3.height) == (50, 50)
+    section, = page3.children[0].children[0].children
+    assert section.element_tag == 'section'
+    div, = section.children
+    assert div.element_tag == 'div'
+
+    assert (page4.width, page4.height) == (100, 100)
+    section, = page4.children[0].children[0].children
+    assert section.element_tag == 'section'
+    div, = section.children
+    assert div.element_tag == 'div'
+
+    assert (page5.width, page5.height) == (50, 50)
+    section, div = page5.children[0].children[0].children
+    assert section.element_tag == 'section'
+    assert div.element_tag == 'div'
+
+    assert (page6.width, page6.height) == (200, 200)
+    div, = page6.children[0].children[0].children
+    assert div.element_tag == 'div'
+
+    assert (page7.width, page7.height) == (50, 50)
+    section, = page7.children[0].children[0].children
+    assert section.element_tag == 'section'
+    div, = section.children
+    assert div.element_tag == 'div'
+
+    assert (page8.width, page8.height) == (50, 50)
+    div, = page8.children[0].children[0].children
+    assert div.element_tag == 'div'
+    section, = div.children
+    assert section.element_tag == 'section'
+
+    assert (page9.width, page9.height) == (50, 50)
+    div, = page9.children[0].children[0].children
+    assert div.element_tag == 'div'
+    section, = div.children
+    assert section.element_tag == 'section'
+
+
+@assert_no_logs
+def test_page_groups_blank_inside():
+    # Regression test for #1076.
+    pages = render_pages('''
+      <style>
+        @page { size: 100px }
+        @page div { size: 50px }
+        div { page: div }
+        p { break-before: right }
+      </style>
+      <div>
+        <p>1</p>
+        <p>2</p>
+      </div>
+    ''')
+    assert len(pages) == 3
+    for page in pages:
+        assert (page.width, page.height) == (50, 50)
+
+
+@assert_no_logs
+def test_page_groups_blank_outside():
+    pages = render_pages('''
+      <style>
+        @page { size: 100px }
+        @page p { size: 50px }
+        p { page: p; break-before: right }
+      </style>
+      <div>
+        <p>1</p>
+        <p>2</p>
+      </div>
+    ''')
+    page1, page2, page3 = pages
+    for page in (page1, page3):
+        assert (page.width, page.height) == (50, 50)
+    assert (page2.width, page2.height) == (100, 100)
+
+
+@assert_no_logs
+def test_page_groups_first_nth():
+    # Regression test for #2429.
+    pages = render_pages('''
+      <style>
+        @page { size: 100px }
+        @page div { size: 50px }
+        @page :nth(2n+1 of div) { size: 30px }
+        div { page: div; break-before: right }
+        p { break-before: page }
+      </style>
+      <div>
+        <p>1</p>
+        <p>2</p>
+        <p>3</p>
+      </div>
+      <div>
+        <p>4</p>
+        <p>5</p>
+      </div>
+    ''')
+    page1, page2, page3, page4, page5, page6 = pages
+    for page in (page1, page3, page5):
+        assert (page.width, page.height) == (30, 30)
+    for page in (page2, page6):
+        assert (page.width, page.height) == (50, 50)
+    assert (page4.width, page4.height) == (100, 100)
 
 
 @assert_no_logs
@@ -1509,7 +1655,7 @@ def test_running_elements_display():
 
 @assert_no_logs
 def test_running_img():
-    # Test regression
+    # Regression test.
     render_pages('''
       <style>
         img {
@@ -1527,7 +1673,7 @@ def test_running_img():
 
 @assert_no_logs
 def test_running_absolute():
-    # Test regression: https://github.com/Kozea/WeasyPrint/issues/1540
+    # Regression test for #1540.
     render_pages('''
       <style>
         footer {
@@ -1548,7 +1694,7 @@ def test_running_absolute():
 
 @assert_no_logs
 def test_running_flex():
-    # Test regression
+    # Regression test.
     render_pages('''
       <style>
         footer {
@@ -1569,7 +1715,7 @@ def test_running_flex():
 
 @assert_no_logs
 def test_running_float():
-    # Test regression
+    # Regression test.
     render_pages('''
       <style>
         footer {

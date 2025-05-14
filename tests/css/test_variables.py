@@ -129,7 +129,7 @@ def test_variable_chain():
 
 @assert_no_logs
 def test_variable_chain_root():
-    # Regression test for https://github.com/Kozea/WeasyPrint/issues/1656
+    # Regression test for #1656.
     page, = render_pages('''
       <style>
         html { --var2: 10px; --var1: var(--var2); width: var(--var1) }
@@ -156,7 +156,7 @@ def test_variable_loop():
 
 
 def test_variable_chain_root_missing():
-    # Regression test for https://github.com/Kozea/WeasyPrint/issues/1656
+    # Regression test for #1656.
     page, = render_pages('''
       <style>
         html { --var1: var(--var-missing); width: var(--var1) }
@@ -165,7 +165,7 @@ def test_variable_chain_root_missing():
 
 
 def test_variable_chain_root_missing_inherited():
-    # Regression test for https://github.com/Kozea/WeasyPrint/issues/2164
+    # Regression test for #2164.
     page, = render_pages('''
       <style>
         html { --var1: var(--var-missing); font: var(--var1) }
@@ -342,7 +342,7 @@ def test_variable_shorthand_background_invalid(var, background):
 
 @assert_no_logs
 def test_variable_initial():
-    # Regression test for https://github.com/Kozea/WeasyPrint/issues/2075
+    # Regression test for #2075.
     page, = render_pages('''
       <style>
         html { --var: initial }
@@ -358,7 +358,7 @@ def test_variable_initial():
 
 @assert_no_logs
 def test_variable_initial_default():
-    # Regression test for https://github.com/Kozea/WeasyPrint/issues/2075
+    # Regression test for #2075.
     page, = render_pages('''
       <style>
         p { --var: initial; width: var(--var, 10px) }
@@ -373,7 +373,7 @@ def test_variable_initial_default():
 
 @assert_no_logs
 def test_variable_initial_default_var():
-    # Regression test for https://github.com/Kozea/WeasyPrint/issues/2075
+    # Regression test for #2075.
     page, = render_pages('''
       <style>
         p { --var: initial; width: var(--var, var(--var)) }
@@ -401,7 +401,7 @@ def test_variable_fallback(prop):
 
 @assert_no_logs
 def test_variable_list_content():
-    # Regression test for https://github.com/Kozea/WeasyPrint/issues/1287
+    # Regression test for #1287.
     page, = render_pages('''
       <style>
         :root { --var: "Page " counter(page) "/" counter(pages) }
@@ -486,6 +486,21 @@ def test_variable_in_function():
     h11, div1, h12, div2 = section.children
     assert div1.children[0].children[0].children[0].text == '1'
     assert div2.children[0].children[0].children[0].text == '2'
+
+
+@assert_no_logs
+def test_variable_in_nested_function():
+    page, = render_pages('''
+      <style>
+        body { --var: 255 0 0 }
+        div { background-image: linear-gradient(rgba(var(--var))) }
+      </style>
+      <div></div>
+    ''')
+    html, = page.children
+    body, = html.children
+    div, = body.children
+    assert div.style['background_image'][0][1].colors[0] == (1, 0, 0, 1)
 
 
 @assert_no_logs

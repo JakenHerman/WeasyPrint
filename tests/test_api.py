@@ -4,6 +4,7 @@ import contextlib
 import gzip
 import io
 import os
+import re
 import sys
 import threading
 import unicodedata
@@ -18,6 +19,7 @@ from PIL import Image
 
 from weasyprint import CSS, HTML, __main__, default_url_fetcher
 from weasyprint.pdf.anchors import resolve_links
+from weasyprint.pdf.metadata import generate_rdf_metadata
 from weasyprint.urls import path2url
 
 from .draw import parse_pixels
@@ -414,14 +416,14 @@ def test_command_line_render(tmp_path):
         os.environ.pop('SOURCE_DATE_EPOCH')
 
         stdout = _run('combined.html --uncompressed-pdf -')
-        assert stdout.count(b'attachment') == 0
+        assert stdout.count(b'Filespec') == 0
         stdout = _run('combined.html --uncompressed-pdf -')
-        assert stdout.count(b'attachment') == 0
+        assert stdout.count(b'Filespec') == 0
         stdout = _run('-a pattern.png --uncompressed-pdf combined.html -')
-        assert stdout.count(b'attachment') == 1
+        assert stdout.count(b'Filespec') == 1
         stdout = _run(
             '-a style.css -a pattern.png --uncompressed-pdf combined.html -')
-        assert stdout.count(b'attachment') == 2
+        assert stdout.count(b'Filespec') == 2
 
         _run('combined.html out23.pdf --timeout 30')
         assert (tmp_path / 'out23.pdf').read_bytes() == pdf_bytes
@@ -531,6 +533,30 @@ def test_pdf_srgb():
 def test_pdf_no_srgb():
     stdout = _run('--uncompressed-pdf - -', b'test')
     assert b'sRGB' not in stdout
+
+
+def test_pdf_font_name():
+    # Regression test for #2396.
+    stdout = _run('--uncompressed-pdf - -', b'<div style="font-family:weasyprint">test')
+    assert b'+weasyprint/' in stdout
+
+
+def test_cmap():
+    # Regression test for #2388.
+    stdout = _run('--uncompressed-pdf --full-fonts - -', b'test')
+    matches = re.findall(b'(\\d+) beginbfchar', stdout)
+    assert matches
+    for match in matches:
+        assert int(match) <= 100
+
+
+def test_cmap_rtl():
+    # Regression test for #378.
+    stdout = _run(
+        '--uncompressed-pdf -e utf-8 - -',
+        '<div style="font-family: weasyprint">اب'.encode())
+    assert b'<00cf> <0627>' in stdout
+    assert b'<00d0> <0628>' in stdout
 
 
 @pytest.mark.parametrize('html, fields', (
@@ -1048,7 +1074,7 @@ def test_links_11():
 @assert_no_logs
 def test_links_12():
     # Absolute URI with no fragment and the same base URI: keep external URI
-    # Regression test for https://github.com/Kozea/WeasyPrint/issues/1767
+    # Regression test for #1767.
     assert_links(
         '''
             <body style="width: 200px">
@@ -1140,6 +1166,7 @@ def assert_meta(html, **meta):
     meta.setdefault('attachments', [])
     meta.setdefault('lang', None)
     meta.setdefault('custom', {})
+    meta.setdefault('generate_rdf_metadata', generate_rdf_metadata)
     assert vars(FakeHTML(string=html).render().metadata) == meta
 
 
@@ -1278,7 +1305,7 @@ def test_http():
 
 @assert_no_logs
 def test_page_copy_relative():
-    # Regression test for https://github.com/Kozea/WeasyPrint/issues/1473
+    # Regression test for #1473.
     document = FakeHTML(string='<div style="position: relative">a').render()
     duplicated_pages = document.copy([*document.pages, *document.pages])
     pngs = duplicated_pages.write_png(split_images=True)
